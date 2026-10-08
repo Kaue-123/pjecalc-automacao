@@ -13,12 +13,15 @@ DATAS BUSCADAS:
   - IPCA-E: 01/01/1992 a 31/05/2026
 
 PRE-REQUISITOS:
-  pip install selenium webdriver-manager pandas openpyxl
+  pip install -r requirements.txt
 
 ANTES DE RODAR:
-  1. Inicie o PJe-Calc (iniciarPJeCalc.bat) e aguarde a tela inicial
-  2. Feche o navegador que o PJe-Calc abriu automaticamente
-  3. Execute: python automacao_pjecalc_rpa.py
+  1. Suba o PJe-Calc e aguarde ele responder:
+       Linux   : ~/.local/share/pjecalc/pjecalc.sh start
+       Windows : iniciarPJeCalc.bat
+  2. Feche o navegador que o PJe-Calc abriu automaticamente (so no Windows;
+     o lancador do Linux nao abre navegador nenhum)
+  3. Execute: python busca_indices_rpa.py
 =============================================================================
 """
 
@@ -49,12 +52,20 @@ CONFIG_INDICES = {
         "tabela_de":  "06/2026",     # campo "Tabela de*"  (último mês desejado)
         "a_partir":   "01/1967",     # campo "A partir de" (mês inicial)
         "termos_selecao": ["TR"],    # fallback se aba não for encontrada por texto exato
+        # IDs JSF conferidos no DOM da 2.16.0. Note a inconsistencia do PJe-Calc:
+        # a aba TR carrega "Indice" no meio do id, a IPCA-E nao.
+        "id_tabela_de": "formulario:mesAnoConsultaIndiceTRInputDate",
+        "id_a_partir":  "formulario:aPartirDeIndiceTRInputDate",
+        "id_pesquisar": "formulario:cmdVisualizarIndiceTR",
     },
     "IPCAE": {
         "tab_texto":  "IPCA-E",      # texto exato da aba
         "tabela_de":  "05/2026",     # campo "Tabela de*"
         "a_partir":   "01/1992",     # campo "A partir de"
         "termos_selecao": ["IPCA-E"],
+        "id_tabela_de": "formulario:mesAnoConsultaIPCAEInputDate",
+        "id_a_partir":  "formulario:aPartirDeIPCAEInputDate",
+        "id_pesquisar": "formulario:cmdVisualizarIPCAE",
     },
 }
 
@@ -144,6 +155,8 @@ def dump_dom(driver, nome):
 def pausar(driver, msg):
     shot(driver, "pausa_manual")
     warn(msg)
+    if not sys.stdin.isatty():
+        raise RuntimeError(f"Etapa manual necessaria em execucao nao-interativa: {msg}")
     input("  >> Pressione ENTER para continuar... ")
 
 
@@ -158,7 +171,10 @@ def criar_driver():
         from selenium.webdriver.firefox.options import Options
         from webdriver_manager.firefox import GeckoDriverManager
         options = Options()
-        options.binary_location = r"C:\Program Files\Mozilla Firefox\firefox.exe"
+        # No Linux o Firefox esta no PATH e o Selenium o localiza sozinho; so o
+        # Windows precisa do caminho explicito.
+        if sys.platform.startswith("win"):
+            options.binary_location = r"C:\Program Files\Mozilla Firefox\firefox.exe"
         # Perfil dedicado + -no-remote: força uma instância isolada e impede
         # que o Firefox "grude" numa janela já aberta (o que faz o processo
         # encerrar com status 0 e o geckodriver perder a sessão).
@@ -480,17 +496,15 @@ def extrair_indice_correcao_monetaria(driver, nome_indice, config):
     time.sleep(1.5)
     shot(driver, f"03_aba_{nome_indice}_selecionada")
 
-    # ── Preenche datas MANUALMENTE ───────────────────────────
+    # ── Preenche datas e pesquisa ────────────────────────────
     print()
-    warn(f"  Preencha os campos de data na tela:")
-    warn(f"    'Tabela de *'  = {config['tabela_de']}")
-    warn(f"    'A partir de'  = {config['a_partir']}")
-    warn(f"  Depois clique em 'Pesquisar'.")
-    shot(driver, f"04_aguardando_datas_{nome_indice}")
-    input("\n  >> Após preencher as datas e clicar em Pesquisar, pressione ENTER aqui... ")
-    print()
+    _preencher_campos_data(driver, config)
+    shot(driver, f"04_datas_preenchidas_{nome_indice}")
 
-    time.sleep(2)
+    time.sleep(1)
+    if not _clicar_pesquisar(driver, config.get("id_pesquisar")):
+        shot(driver, f"05_pesquisar_falhou_{nome_indice}")
+        pausar(driver, "Clique em 'Pesquisar' na tela e pressione ENTER.")
 
     time.sleep(2.5)
     shot(driver, f"06_resultados_{nome_indice}")
@@ -612,17 +626,21 @@ def _clicar_aba_indice(driver, texto_aba):
     return False
 
 
-def _preencher_campos_data(driver, tabela_de, a_partir):
+def _preencher_campos_data(driver, config):
     """
     Preenche os campos "Tabela de *" e "A partir de" na seção Consulta.
+
+    O caminho bom é pelo id JSF (config["id_tabela_de"] / ["id_a_partir"]).
+    As heuristicas por rótulo e por posição ficam só como rede de segurança
+    para quando o PJe-Calc renomear os ids numa versão nova.
 
     PROBLEMA CONHECIDO: entre os dois inputs há um botão de calendário (📅).
     Pressionar TAB move o foco para esse botão, abre o calendário e buga o
     preenchimento. SOLUÇÃO: usar JS blur() em vez de TAB, e encontrar cada
     input navegando de TD em TD (não pela linha inteira).
     """
-    from selenium.webdriver.common.keys import Keys
-
+    tabela_de = config["tabela_de"]
+    a_partir  = config["a_partir"]
     log(f"  Preenchendo: Tabela de={tabela_de} | A partir de={a_partir}", "   ")
 
     def escrever_sem_tab(campo, valor):
@@ -651,11 +669,10 @@ def _preencher_campos_data(driver, tabela_de, a_partir):
             """, campo)
             time.sleep(0.2)
 
-            # Fecha qualquer calendário que possa ter aberto
-            try:
-                campo.send_keys(Keys.ESCAPE)
-            except Exception:
-                pass
+            # NAO mandar ESCAPE aqui. O calendario do RichFaces trata ESC como
+            # "cancelar" e LIMPA o input — era isso que zerava o campo recem
+            # preenchido e fazia esta funcao devolver False. O blur() acima ja
+            # fecha o calendario.
 
             val_atual = driver.execute_script("return arguments[0].value;", campo)
             return valor in (val_atual or "")
@@ -707,25 +724,45 @@ def _preencher_campos_data(driver, tabela_de, a_partir):
         """
         return driver.execute_script(script, rotulo_texto)
 
+    def por_id(id_jsf):
+        """Localiza pelo id JSF (getElementById, que aceita o ':' do JSF sem escape)."""
+        if not id_jsf:
+            return None
+        try:
+            return driver.execute_script(
+                "return document.getElementById(arguments[0]);", id_jsf)
+        except Exception:
+            return None
+
     # ── Preenche "Tabela de *" ────────────────────────────────
     sucesso_1 = False
-    campo_tabela = encontrar_input_por_td_rotulo("Tabela de")
-    if campo_tabela:
-        sucesso_1 = escrever_sem_tab(campo_tabela, tabela_de)
-        if sucesso_1:
-            ok(f"  'Tabela de*' = '{tabela_de}'")
+    campo_tabela = por_id(config.get("id_tabela_de"))
+    if campo_tabela and escrever_sem_tab(campo_tabela, tabela_de):
+        sucesso_1 = True
+        ok(f"  'Tabela de*' = '{tabela_de}' (por id)")
     if not sucesso_1:
-        warn(f"  Campo 'Tabela de*' nao encontrado pelo rótulo.")
+        campo_tabela = encontrar_input_por_td_rotulo("Tabela de")
+        if campo_tabela:
+            sucesso_1 = escrever_sem_tab(campo_tabela, tabela_de)
+            if sucesso_1:
+                ok(f"  'Tabela de*' = '{tabela_de}' (por rótulo)")
+    if not sucesso_1:
+        warn(f"  Campo 'Tabela de*' nao encontrado por id nem por rótulo.")
 
     # ── Preenche "A partir de" ────────────────────────────────
     sucesso_2 = False
-    campo_apartir = encontrar_input_por_td_rotulo("A partir de")
-    if campo_apartir:
-        sucesso_2 = escrever_sem_tab(campo_apartir, a_partir)
-        if sucesso_2:
-            ok(f"  'A partir de' = '{a_partir}'")
+    campo_apartir = por_id(config.get("id_a_partir"))
+    if campo_apartir and escrever_sem_tab(campo_apartir, a_partir):
+        sucesso_2 = True
+        ok(f"  'A partir de' = '{a_partir}' (por id)")
     if not sucesso_2:
-        warn(f"  Campo 'A partir de' nao encontrado pelo rótulo.")
+        campo_apartir = encontrar_input_por_td_rotulo("A partir de")
+        if campo_apartir:
+            sucesso_2 = escrever_sem_tab(campo_apartir, a_partir)
+            if sucesso_2:
+                ok(f"  'A partir de' = '{a_partir}' (por rótulo)")
+    if not sucesso_2:
+        warn(f"  Campo 'A partir de' nao encontrado por id nem por rótulo.")
 
     # ── Fallback: posição na tela (1º e 2º inputs do conteúdo) ───────
     if not sucesso_1 or not sucesso_2:
@@ -734,9 +771,10 @@ def _preencher_campos_data(driver, tabela_de, a_partir):
             if inp.is_displayed() and inp.is_enabled()
             and inp.get_attribute("type") not in
                 ("hidden", "submit", "button", "checkbox", "radio", "image")
-            and driver.execute_script(
-                "return arguments[0].getBoundingClientRect().left;", inp) > 230
         ]
+        # Nao filtrar por posicao: na tela de indices o painel de consulta fica
+        # com left negativo (fora da viewport) e o filtro antigo (left > 230)
+        # descartava justamente os dois campos que interessam.
         if not sucesso_1 and len(campos_vis) >= 1:
             sucesso_1 = escrever_sem_tab(campos_vis[0], tabela_de)
             if sucesso_1:
@@ -753,16 +791,20 @@ def _preencher_campos_data(driver, tabela_de, a_partir):
 
     return sucesso_1 or sucesso_2
 
-def _escrever_campo(driver, campo, valor):
-    try:
-        campo.clear()
-        campo.send_keys(valor)
-        # Dispara evento change para frameworks reativos
-        driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", campo)
-    except Exception:
-        driver.execute_script(f"arguments[0].value = '{valor}';", campo)
+def _clicar_pesquisar(driver, id_botao=None):
+    # O botao da tela de indices e um <a> do RichFaces (A4J.AJAX.Submit), nao um
+    # <input type=submit> — por isso o id explicito vem primeiro.
+    if id_botao:
+        try:
+            el = driver.execute_script(
+                "return document.getElementById(arguments[0]);", id_botao)
+            if el:
+                clicar(driver, el)
+                ok(f"Botao 'Pesquisar' clicado (id {id_botao})")
+                return True
+        except Exception:
+            pass
 
-def _clicar_pesquisar(driver):
     termos = ["pesquisar", "consultar", "buscar", "pesquisa", "filtrar", "ok"]
     for termo in termos:
         for xp in [
