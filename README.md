@@ -39,15 +39,27 @@ aplicação usa esbarram no encapsulamento de módulos
 (`InaccessibleObjectException`) e o contexto `/pjecalc` não sobe — testado, e
 `--add-opens` só empurra o erro do Seam para o Drools.
 
-### Display
+### Sem janela: o modo serviço
 
-O lançador precisa de um display (XWayland serve). Com
-`-Djava.awt.headless=true` o Java 8 estoura `HeadlessException` em
-`SplashScreen.getSplashScreen()` e morre antes do Tomcat subir.
+O `Lancador` que é o `Main-Class` do jar faz três coisas: prepara as variáveis e
+o banco, sobe o Tomcat e só então abre uma interface. A interface é um ícone na
+bandeja do sistema quando há bandeja; quando não há — no Wayland, por exemplo —
+ele cai numa `JFrame` com dois botões, "Abrir o PjeCalc" e "Sair", que fica
+parada na tela sem servir para nada em uso automatizado.
 
-No log aparece um `IllegalStateException: no splash screen available` na thread
-`main`. É inofensivo: dispara **depois** do Tomcat já estar servindo, e a JVM
-segue viva pelas threads não-daemon do Tomcat.
+Daí `scripts/servico/PjeCalcServico.java`: repete as duas primeiras etapas,
+chamando por reflexão os métodos privados do `Lancador` que preparam o ambiente,
+e para antes da terceira. O `pjecalc.sh` o compila na primeira execução.
+
+O que a janela fazia de útil era **segurar a JVM viva** — as threads do Tomcat
+embarcado aqui são daemon, quem não deixava o processo morrer era a thread de
+eventos do AWT. Por isso a `main` do `PjeCalcServico` fica bloqueada até chegar
+um `SIGTERM`; o hook de desligamento do Catalina para o Tomcat e fecha o H2.
+
+Sem AWT, `-Djava.awt.headless=true` deixa de ser problema: ninguém mais chama
+`SplashScreen.getSplashScreen()`, que era o que estourava `HeadlessException` no
+Java 8 e derrubava o processo antes do Tomcat subir. O servidor roda sem display
+nenhum. Quem ainda precisa de display é o Firefox da automação.
 
 ## Uso
 
@@ -69,6 +81,23 @@ Saída em `output/`:
 
 Mais screenshots e dumps de DOM a cada etapa, úteis quando o PJe-Calc muda de
 layout e algum seletor quebra.
+
+### Deixando o servidor de pé sozinho
+
+Para não ter de subir o PJe-Calc a cada vez, há uma unidade de usuário do
+systemd — de usuário, não de sistema, porque o banco H2 fica no `$HOME` e o
+servidor só atende em `localhost`:
+
+```bash
+cp scripts/pjecalc.service ~/.config/systemd/user/
+systemctl --user enable --now pjecalc   # sobe agora e a cada login
+systemctl --user status pjecalc
+journalctl --user -u pjecalc -f
+```
+
+Ela chama `pjecalc.sh foreground`, que roda o java como processo principal da
+unidade, sem `setsid` nem arquivo de pid. Com a unidade no ar, não use
+`pjecalc.sh start`/`stop` — os dois controles brigam pelo mesmo processo.
 
 A extração roda de ponta a ponta sem intervenção. Se alguma etapa cair num
 fallback que exige mão humana, o script só pede ENTER quando há terminal

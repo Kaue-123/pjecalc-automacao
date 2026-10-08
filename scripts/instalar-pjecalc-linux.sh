@@ -12,6 +12,7 @@ VERSAO="2.16.0"
 URL="https://www.trt8.jus.br/sites/portal/files/roles/pje-calc/pjecalc-${VERSAO}-instalador-x64.exe"
 MD5_ESPERADO="a3795d4074563ce36b39b209c2c6f207"
 JAVA_VERSAO="temurin-8.0.504+1"
+JAVA_HOME_8="$HOME/.local/share/mise/installs/java/$JAVA_VERSAO"
 DESTINO="${PJECALC_HOME:-$HOME/.local/share/pjecalc}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -57,8 +58,16 @@ chmod 600 "$DESTINO/pjecalc.env"
 # os dois so pesam (167 MB) e nao rodam aqui.
 rm -rf "$DESTINO/bin/jre" "$DESTINO/navegador/windows" "$DESTINO"/*.bat
 
-cp "$(dirname "$(readlink -f "$0")")/pjecalc.sh" "$DESTINO/pjecalc.sh"
+SCRIPTS="$(dirname "$(readlink -f "$0")")"
+cp "$SCRIPTS/pjecalc.sh" "$DESTINO/pjecalc.sh"
 chmod +x "$DESTINO/pjecalc.sh"
+
+# A classe de servico: sobe o Tomcat sem a UI do Lancador oficial, que no Wayland
+# cai numa JFrame inutil ("Abrir o PjeCalc"/"Sair") so para segurar a JVM viva.
+mkdir -p "$DESTINO/bin/servico"
+cp "$SCRIPTS/servico/PjeCalcServico.java" "$DESTINO/bin/servico/"
+"$JAVA_HOME_8/bin/javac" -encoding UTF-8 -cp "$DESTINO/bin/pjecalc.jar" \
+  -d "$DESTINO/bin/servico" "$DESTINO/bin/servico/PjeCalcServico.java"
 
 echo
 echo "Pronto. Para usar:"
