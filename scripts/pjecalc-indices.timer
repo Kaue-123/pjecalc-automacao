@@ -1,0 +1,25 @@
+# "Dia 6 de todo mes, as 11h; se cair no fim de semana, na segunda seguinte."
+#
+# O systemd nao sabe o que e dia util, entao o timer dispara nos dias 6, 7 e 8
+# — so de segunda a sexta — e o rodada-mensal.sh sai na hora se o mes ja tiver
+# sido feito. Os tres dias cobrem os casos:
+#
+#   6 cai em dia util  -> roda no 6;  7 e 8 nao fazem nada
+#   6 cai no sabado    -> 7 e domingo, 8 e segunda -> roda no 8
+#   6 cai no domingo   -> 7 e segunda              -> roda no 7
+#
+# Feriado nao entra na conta: o systemd nao tem calendario. Se a maquina
+# estiver desligada no feriado, o Persistent recupera no proximo boot.
+[Unit]
+Description=Dispara a extracao mensal dos indices do TRT 8
+
+[Timer]
+OnCalendar=Mon..Fri *-*-06,07,08 11:00:00
+# Maquina desligada na hora marcada: roda assim que ligar.
+Persistent=true
+# Evita bater no portal do TRT no mesmo segundo que todo mundo.
+RandomizedDelaySec=5min
+Unit=pjecalc-indices.service
+
+[Install]
+WantedBy=timers.target

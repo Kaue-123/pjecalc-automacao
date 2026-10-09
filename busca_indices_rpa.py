@@ -8,9 +8,15 @@ FLUXO CORRETO (baseado na interface real do PJe-Calc):
   2. Home → menu Tabelas → "Correção Monetária" → filtrar datas → extrair TR
   3. Home → menu Tabelas → "Correção Monetária" → filtrar datas → extrair IPCA-E
 
-DATAS BUSCADAS:
-  - TR    : 01/01/1967 a 30/06/2026
-  - IPCA-E: 01/01/1992 a 31/05/2026
+DATAS BUSCADAS (calculadas na hora de rodar):
+  - TR    : de 01/1967 ate o MES SEGUINTE ao da execucao
+  - IPCA-E: de 01/1992 ate o MES CORRENTE
+
+  Pedir um mes a frente e de proposito: o PJe-Calc nao reclama de um mes que
+  ainda nao existe, so entrega ate onde tem. Assim a planilha sai sempre
+  completa, sem depender do dia em que o TRT publicou o indice.
+  Para uma rodada fora do padrao, use PJECALC_TR_ATE / PJECALC_IPCAE_ATE
+  (formato MM/AAAA).
 
 PRE-REQUISITOS:
   pip install -r requirements.txt
@@ -46,10 +52,25 @@ TIMEOUT    = 20
 # Datas de consulta para cada índice
 # Formato dos campos na tela: MM/AAAA  (ex: "06/2026")
 # tab_texto: texto EXATO da aba na tela indices-gerais.jsf
+
+def _mes_ano(ano, mes):
+    """Normaliza (ano, mes) com mes fora de 1..12 e devolve 'MM/AAAA'."""
+    ano += (mes - 1) // 12
+    mes = (mes - 1) % 12 + 1
+    return f"{mes:02d}/{ano}"
+
+HOJE_DT = datetime.now()
+
+# O TRT publica a TR do mes corrente por volta do dia 8 e a IPCA-E do mes
+# anterior por volta do dia 2. Pedir TR um mes a frente e IPCA-E no mes corrente
+# cobre os dois calendarios sem precisar saber em que dia a rodada caiu.
+TR_ATE    = os.environ.get("PJECALC_TR_ATE")    or _mes_ano(HOJE_DT.year, HOJE_DT.month + 1)
+IPCAE_ATE = os.environ.get("PJECALC_IPCAE_ATE") or _mes_ano(HOJE_DT.year, HOJE_DT.month)
+
 CONFIG_INDICES = {
     "TR": {
         "tab_texto":  "TR",          # texto exato da aba (case-sensitive)
-        "tabela_de":  "06/2026",     # campo "Tabela de*"  (último mês desejado)
+        "tabela_de":  TR_ATE,        # campo "Tabela de*"  (último mês desejado)
         "a_partir":   "01/1967",     # campo "A partir de" (mês inicial)
         "termos_selecao": ["TR"],    # fallback se aba não for encontrada por texto exato
         # IDs JSF conferidos no DOM da 2.16.0. Note a inconsistencia do PJe-Calc:
@@ -60,7 +81,7 @@ CONFIG_INDICES = {
     },
     "IPCAE": {
         "tab_texto":  "IPCA-E",      # texto exato da aba
-        "tabela_de":  "05/2026",     # campo "Tabela de*"
+        "tabela_de":  IPCAE_ATE,     # campo "Tabela de*"
         "a_partir":   "01/1992",     # campo "A partir de"
         "termos_selecao": ["IPCA-E"],
         "id_tabela_de": "formulario:mesAnoConsultaIPCAEInputDate",
@@ -69,10 +90,18 @@ CONFIG_INDICES = {
     },
 }
 
-HOJE       = datetime.now().strftime("%d%m%Y")
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-ARQ_TR     = os.path.join(OUTPUT_DIR, f"indices_TR_TRT8_{HOJE}.xlsx")
-ARQ_IPCAE  = os.path.join(OUTPUT_DIR, f"indices_IPCAE_TRT8_{HOJE}.xlsx")
+# Cada rodada tem a sua pasta, nomeada pela data com hifens. O perfil do Firefox
+# fica na raiz de output/ porque e reaproveitado entre rodadas.
+DATA_RODADA  = HOJE_DT.strftime("%d-%m-%Y")
+OUTPUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+PASTA_RODADA = os.path.join(OUTPUT_DIR, DATA_RODADA)
+ARQ_TR       = os.path.join(PASTA_RODADA, f"indices_TR_TRT8_{DATA_RODADA}.xlsx")
+ARQ_IPCAE    = os.path.join(PASTA_RODADA, f"indices_IPCAE_TRT8_{DATA_RODADA}.xlsx")
+
+# Screenshot e dump de DOM a cada etapa so com PJECALC_DEBUG=1. Sem isso, a
+# pasta da rodada fica so com as duas planilhas — mas as capturas de FALHA
+# continuam saindo sempre, que e o unico momento em que alguem vai olhar.
+DEBUG = os.environ.get("PJECALC_DEBUG") == "1"
 # ─────────────────────────────────────────────
 
 HOME = f"http://localhost:{PORTA}/pjecalc/pages/principal.jsf"
@@ -88,10 +117,20 @@ def warn(m): log(m, "AVS")
 def err(m):  log(m, "ERR")
 def step(m): log(m, "-->")
 
-def shot(driver, nome):
+def shot(driver, nome, erro=False):
+    """
+    Captura a tela na pasta da rodada.
+
+    Nas etapas que deram certo isso so acontece com PJECALC_DEBUG=1 — numa
+    rodada mensal desacompanhada ninguem vai abrir 18 imagens de coisa que
+    funcionou. Quando `erro` e True a captura sai sempre: e o unico registro
+    visual do que a tela mostrava na hora em que quebrou.
+    """
+    if not (DEBUG or erro):
+        return
     try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        p = os.path.join(OUTPUT_DIR, f"debug_{nome}.png")
+        os.makedirs(PASTA_RODADA, exist_ok=True)
+        p = os.path.join(PASTA_RODADA, f"debug_{nome}.png")
         driver.save_screenshot(p)
         log(f"Screenshot: debug_{nome}.png", "DBG")
     except Exception:
@@ -141,11 +180,13 @@ def voltar_home(driver):
     time.sleep(2)
 
 
-def dump_dom(driver, nome):
-    """Salva o HTML da tela atual em output/ para inspecao dos seletores."""
+def dump_dom(driver, nome, erro=False):
+    """Salva o HTML da tela atual na pasta da rodada, para inspecao dos seletores."""
+    if not (DEBUG or erro):
+        return
     try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        p = os.path.join(OUTPUT_DIR, f"dom_{nome}.html")
+        os.makedirs(PASTA_RODADA, exist_ok=True)
+        p = os.path.join(PASTA_RODADA, f"dom_{nome}.html")
         with open(p, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
         log(f"DOM salvo: dom_{nome}.html", "DBG")
@@ -183,6 +224,11 @@ def criar_driver():
         options.add_argument("-no-remote")
         options.add_argument("-profile")
         options.add_argument(perfil_dir)
+        # PJECALC_FF_HEADLESS=1 roda sem janela, para nao tomar o foco de quem
+        # esta usando a maquina. O Firefox headless desenha normalmente (as
+        # capturas de tela continuam saindo); o que some e a janela no monitor.
+        if os.environ.get("PJECALC_FF_HEADLESS") == "1":
+            options.add_argument("-headless")
         drv = webdriver.Firefox(service=Service(GeckoDriverManager().install()), options=options)
     else:
         from selenium.webdriver.chrome.service import Service
@@ -233,7 +279,7 @@ def clicar_menu_id(driver, li_id):
         time.sleep(2.5)
         if tem_erro_interno(driver):
             warn(f"Erro interno apos acionar '{li_id}'.")
-            shot(driver, f"erro_menu_{li_id}")
+            shot(driver, f"erro_menu_{li_id}", erro=True)
             return False
         ok(f"Menu acionado: '{r[3:]}' ({li_id})")
         return True
@@ -389,7 +435,7 @@ def atualizar_tabelas_trt8(driver):
         if tem_erro_interno(driver):
             print()
             warn("Erro interno durante atualizacao.")
-            shot(driver, "erro_atualizacao")
+            shot(driver, "erro_atualizacao", erro=True)
             voltar_home(driver)
             return False
         termos_ok = [
@@ -422,7 +468,7 @@ def _selecionar_trt8(driver):
         except Exception:
             continue
 
-    shot(driver, "selecao_trt_falhou")
+    shot(driver, "selecao_trt_falhou", erro=True)
     pausar(driver, "Selecione 'TRT 8a Região' manualmente e pressione ENTER.")
     return True
 
@@ -471,7 +517,7 @@ def extrair_indice_correcao_monetaria(driver, nome_indice, config):
 
     if not clicar_menu_id(driver, MENU_IDS["correcao_monetaria"]):
         if not clicar_subitem(driver, "Correção Monetária"):
-            shot(driver, f"correcao_monetaria_falhou_{nome_indice}")
+            shot(driver, f"correcao_monetaria_falhou_{nome_indice}", erro=True)
             pausar(driver, "Clique em 'Correção Monetária' no submenu e pressione ENTER.")
 
     time.sleep(2)
@@ -488,7 +534,7 @@ def extrair_indice_correcao_monetaria(driver, nome_indice, config):
     # ── Clica na aba do índice ────────────────────────────────
     tab_texto = config["tab_texto"]   # ex: "TR" ou "IPCA-E"
     if not _clicar_aba_indice(driver, tab_texto):
-        shot(driver, f"02_aba_{nome_indice}_falhou")
+        shot(driver, f"02_aba_{nome_indice}_falhou", erro=True)
         warn(f"Aba '{tab_texto}' nao clicada automaticamente.")
         warn(f"Clique na aba '{tab_texto}' na faixa de abas no topo da tabela.")
         pausar(driver, f"Clique na aba '{tab_texto}' e pressione ENTER.")
@@ -503,7 +549,7 @@ def extrair_indice_correcao_monetaria(driver, nome_indice, config):
 
     time.sleep(1)
     if not _clicar_pesquisar(driver, config.get("id_pesquisar")):
-        shot(driver, f"05_pesquisar_falhou_{nome_indice}")
+        shot(driver, f"05_pesquisar_falhou_{nome_indice}", erro=True)
         pausar(driver, "Clique em 'Pesquisar' na tela e pressione ENTER.")
 
     time.sleep(2.5)
@@ -514,7 +560,7 @@ def extrair_indice_correcao_monetaria(driver, nome_indice, config):
         return [], []
 
     if not _tem_tabela_dados(driver):
-        shot(driver, f"07_sem_dados_{nome_indice}")
+        shot(driver, f"07_sem_dados_{nome_indice}", erro=True)
         warn("Tabela de resultados nao detectada.")
         pausar(driver, "A tabela de resultados deve estar visivel. Pressione ENTER.")
 
@@ -785,7 +831,7 @@ def _preencher_campos_data(driver, config):
                 ok(f"  'A partir de' = '{a_partir}' (por posição[1])")
 
     if not sucesso_1 or not sucesso_2:
-        shot(driver, "datas_nao_preenchidas")
+        shot(driver, "datas_nao_preenchidas", erro=True)
         warn(f"  Preencha manualmente: 'Tabela de*' = {tabela_de} | 'A partir de' = {a_partir}")
         pausar(driver, "Preencha os campos de data e pressione ENTER.")
 
@@ -1055,7 +1101,7 @@ def extrair_tabela_completa(driver, nome):
 
         if tem_erro_interno(driver):
             err(f"Erro interno na pagina {pagina}.")
-            shot(driver, f"erro_pag_{nome}_{pagina:03d}")
+            shot(driver, f"erro_pag_{nome}_{pagina:03d}", erro=True)
             break
 
         # Cabeçalhos (apenas na primeira página)
@@ -1197,7 +1243,7 @@ def main():
     print("  PJe-Calc — Extracao Indices TRT 8 (TR e IPCA-E)")
     print(f"  {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     print("="*62)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(PASTA_RODADA, exist_ok=True)
     driver = None
 
     try:
@@ -1243,7 +1289,9 @@ def main():
         print("  CONCLUIDO")
         print(f"  TR    : {len(r_tr):5d} registros  -> {os.path.basename(ARQ_TR)}")
         print(f"  IPCAE : {len(r_ie):5d} registros  -> {os.path.basename(ARQ_IPCAE)}")
-        print(f"  Pasta : {OUTPUT_DIR}")
+        if r_tr: print(f"  Mes mais recente TR    : {r_tr[0].get('Mês/Ano', '?')}")
+        if r_ie: print(f"  Mes mais recente IPCAE : {r_ie[0].get('Mês/Ano', '?')}")
+        print(f"  Pasta : {PASTA_RODADA}")
         print("="*62)
         time.sleep(3)
 
@@ -1259,7 +1307,7 @@ def main():
             err("Rode de novo e NAO feche a janela que o script abre.")
         else:
             err(f"Erro inesperado: {e}")
-            if driver and sessao_viva(driver): shot(driver, "erro_fatal")
+            if driver and sessao_viva(driver): shot(driver, "erro_fatal", erro=True)
             import traceback; traceback.print_exc()
     finally:
         if driver:

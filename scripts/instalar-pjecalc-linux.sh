@@ -58,6 +58,10 @@ chmod 600 "$DESTINO/pjecalc.env"
 # os dois so pesam (167 MB) e nao rodam aqui.
 rm -rf "$DESTINO/bin/jre" "$DESTINO/navegador/windows" "$DESTINO"/*.bat
 
+# Versao instalada, para o verificar-versao.py comparar com o portal do TRT 8.
+# A home da aplicacao so mostra "Versao 2.16", sem o terceiro numero.
+echo "$VERSAO" > "$DESTINO/VERSAO"
+
 SCRIPTS="$(dirname "$(readlink -f "$0")")"
 cp "$SCRIPTS/pjecalc.sh" "$DESTINO/pjecalc.sh"
 chmod +x "$DESTINO/pjecalc.sh"

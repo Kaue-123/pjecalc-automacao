@@ -74,13 +74,28 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python busca_indices_rpa.py
 ```
 
-Saída em `output/`:
+Cada rodada tem a sua pasta, nomeada pela data:
 
-- `indices_TR_TRT8_<DDMMAAAA>.xlsx`
-- `indices_IPCAE_TRT8_<DDMMAAAA>.xlsx`
+```
+output/09-10-2026/
+├── indices_TR_TRT8_09-10-2026.xlsx
+└── indices_IPCAE_TRT8_09-10-2026.xlsx
+```
 
-Mais screenshots e dumps de DOM a cada etapa, úteis quando o PJe-Calc muda de
-layout e algum seletor quebra.
+As datas consultadas são calculadas na hora de rodar: **TR até o mês seguinte,
+IPCA-E até o mês corrente**, as duas a partir de 01/1967 e 01/1992. Pedir um mês
+à frente é de propósito — o PJe-Calc não reclama de um mês que ainda não existe,
+só entrega até onde tem, e aí a planilha sai completa independentemente do dia
+em que o TRT publicou o índice. Para uma rodada fora do padrão:
+
+```bash
+PJECALC_TR_ATE=03/2027 PJECALC_IPCAE_ATE=02/2027 .venv/bin/python busca_indices_rpa.py
+```
+
+Numa rodada normal a pasta fica só com as duas planilhas. `PJECALC_DEBUG=1`
+acrescenta screenshot e dump de DOM a cada etapa, úteis quando o PJe-Calc muda
+de layout e algum seletor quebra. As capturas de **falha** saem sempre, com ou
+sem a variável: é o único registro visual do que a tela mostrava quando quebrou.
 
 ### Deixando o servidor de pé sozinho
 
@@ -98,6 +113,62 @@ journalctl --user -u pjecalc -f
 Ela chama `pjecalc.sh foreground`, que roda o java como processo principal da
 unidade, sem `setsid` nem arquivo de pid. Com a unidade no ar, não use
 `pjecalc.sh start`/`stop` — os dois controles brigam pelo mesmo processo.
+
+## Rodada mensal automática
+
+A extração inteira — subir o servidor, conferir a versão do PJe-Calc, extrair e
+avisar — roda sozinha uma vez por mês:
+
+```bash
+cp scripts/pjecalc-indices.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now pjecalc-indices.timer
+systemctl --user list-timers pjecalc-indices.timer
+```
+
+**Quando roda:** dia 6 às 11h; se cair no fim de semana, na segunda seguinte.
+
+O systemd não sabe o que é dia útil, então o timer dispara nos dias 6, 7 e 8, só
+de segunda a sexta, e um marcador em `~/.local/state/pjecalc-automacao/` guarda
+o mês já executado — a primeira das três datas roda, as outras saem na hora.
+Os três dias cobrem os casos:
+
+| Dia 6 cai em | Dispara em | Roda em |
+|---|---|---|
+| dia útil | 6 (e 7, 8 se forem úteis) | **6** |
+| sábado | 8 (segunda) | **8** |
+| domingo | 7 (segunda), 8 | **7** |
+
+Feriado não entra na conta — o systemd não tem calendário. Se a máquina estiver
+desligada na hora marcada, `Persistent=true` faz a rodada acontecer no próximo
+boot.
+
+Para rodar na mão, fora da agenda:
+
+```bash
+systemctl --user start pjecalc-indices     # respeita o marcador do mês
+./scripts/rodada-mensal.sh --forcar        # ignora o marcador
+```
+
+### Versão do PJe-Calc
+
+Quando o TRT 8 publica uma versão nova, as tabelas e regras de cálculo mudam
+junto — e a instalação antiga continua rodando e entregando número velho, sem
+reclamar. Por isso toda rodada confere:
+
+```bash
+python3 scripts/verificar-versao.py
+# 0 = em dia | 1 = há versão nova | 2 = não deu para verificar
+```
+
+Ele compara o `VERSAO` gravado pelo instalador com o que o portal do TRT 8
+anuncia, e o aviso entra na notificação do fim da rodada. Baixar e instalar
+continua sendo passo seu: o instalador tem que ser conferido contra o MD5 que o
+tribunal publica, então atualize `VERSAO` e `MD5_ESPERADO` no
+`scripts/instalar-pjecalc-linux.sh` e rode-o.
+
+A unidade aponta para `%h/Projects/pjecalc-automacao`. Se o repositório estiver
+em outro lugar, ajuste o `ExecStart` do `pjecalc-indices.service`.
 
 A extração roda de ponta a ponta sem intervenção. Se alguma etapa cair num
 fallback que exige mão humana, o script só pede ENTER quando há terminal
@@ -135,13 +206,19 @@ No topo de `busca_indices_rpa.py`:
 | `NAVEGADOR` | `"firefox"` ou `"chrome"` |
 | `CONFIG_INDICES` | intervalo de datas e ids JSF de cada índice |
 
-Atualize `tabela_de` em `CONFIG_INDICES` para o mês mais recente que quiser
-puxar — o padrão é TR até `06/2026` e IPCA-E até `05/2026`.
+Variáveis de ambiente:
+
+| Variável | Para quê |
+|---|---|
+| `PJECALC_TR_ATE` / `PJECALC_IPCAE_ATE` | `MM/AAAA` final, no lugar do calculado |
+| `PJECALC_FF_HEADLESS=1` | Firefox sem janela, para rodada desacompanhada |
+| `PJECALC_DEBUG=1` | screenshot e dump de DOM a cada etapa |
+| `PJECALC_HOME` | instalação do PJe-Calc (padrão `~/.local/share/pjecalc`) |
 
 ## Comandos do lançador
 
 ```
-pjecalc.sh start | stop | restart | status | abrir
+pjecalc.sh start | stop | restart | status | abrir | foreground
 ```
 
 ## Requisitos
