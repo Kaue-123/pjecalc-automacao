@@ -183,6 +183,40 @@ O script abre uma **janela dedicada do Firefox**, com perfil isolado e
 `-no-remote`. Não a feche enquanto estiver rodando — sem isso o Firefox gruda
 numa janela já aberta, encerra com status 0 e o geckodriver perde a sessão.
 
+## Testes
+
+```bash
+./tests/rodar.sh
+```
+
+77 testes, sem rede e sem subir o PJe-Calc — tudo que toca o mundo (`curl`,
+`systemctl`, `notify-send`, o lançador, a extração) está substituído por dublê.
+
+| Arquivo | Cobre |
+|---|---|
+| `tests/test_datas.py` | TR no mês seguinte, IPCA-E no corrente, virada de ano, nomes e pastas de saída |
+| `tests/test_verificar_versao.py` | leitura do portal, ordem das fontes, comparação numérica, os três códigos de saída |
+| `tests/test_timer.py` | todo mês tem rodada no dia 6 ou no primeiro dia útil seguinte, por 24 meses |
+| `tests/test_lancador.sh` | `url`, `esperar`, `status`, recusa sem `pjecalc.env` |
+| `tests/test_rodada_mensal.sh` | marcador, `--forcar`, falhas, captura da pasta, aviso de versão |
+
+A extração em si (Selenium contra o PJe-Calc) não cabe nesse formato. Essa se
+verifica rodando de verdade:
+
+```bash
+./scripts/rodada-mensal.sh --forcar
+```
+
+### Os testes são testados
+
+A suíte foi validada por mutação: quebra-se o código de propósito e confere-se
+que ela acusa. As nove mutações conferidas estão listadas no commit que
+introduziu os testes — duas delas passaram na primeira tentativa e revelaram
+buracos reais (um mês sem disparo nenhum não era conferido, e uma asserção com
+`in` aceitava o fallback no lugar do caminho preferido).
+
+Ao mexer na lógica de decisão, repita: quebre, rode, veja falhar.
+
 ## Configuração
 
 No topo de `busca_indices_rpa.py`:

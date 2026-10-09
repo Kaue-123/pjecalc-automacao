@@ -56,7 +56,7 @@ start() {
 
 # O Tomcat leva uns 10 s para publicar /pjecalc depois que o processo sobe.
 esperar() {
-  for _ in $(seq 1 90); do
+  for _ in $(seq 1 "${PJECALC_TENTATIVAS:-90}"); do
     curl -sf -o /dev/null --max-time 5 "$URL" && return 0
     echo -n "."; sleep 2
   done
