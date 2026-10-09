@@ -1,3 +1,4 @@
+import br.jus.trt8.pjecalcsa.container.Lancador;
 import br.jus.trt8.pjecalcsa.container.TomCat;
 
 import java.io.File;
@@ -6,32 +7,27 @@ import java.lang.reflect.Method;
 /**
  * Sobe o PJe-Calc Cidadao como servico, sem interface grafica.
  *
- * O Lancador oficial (br.jus.trt8.pjecalcsa.container.Lancador) faz tres coisas:
- * prepara as variaveis e o banco, sobe o Tomcat e so entao abre uma UI. A UI e
- * um icone na bandeja do sistema quando ha bandeja; quando nao ha -- Wayland,
- * por exemplo -- ele cai numa JFrame com dois botoes ("Abrir o PjeCalc" e
- * "Sair") que fica parada na tela sem servir para nada em uso automatizado.
+ * O Lancador oficial so abre uma UI depois de subir o Tomcat, e no Wayland
+ * essa UI e uma JFrame inutil. Ela so nao podia ser fechada porque era a
+ * thread de eventos do AWT que segurava a JVM viva — as threads do Tomcat
+ * embarcado sao daemon. Aqui o CountDownLatch faz esse papel.
  *
- * Aqui repetimos as duas primeiras etapas e paramos antes da terceira, sem
- * precisar de display nenhum. Em compensacao a main tem de ficar bloqueada: as
- * threads do Tomcat embarcado sao daemon, quem segurava a JVM viva era
- * justamente a thread de eventos do AWT que a UI criava.
+ * Detalhes em README.md, secao "Sem janela: o modo servico".
  */
 public class PjeCalcServico {
 
     public static void main(String[] args) throws Exception {
         System.setProperty("caminho.instalacao", new File("").getAbsolutePath());
 
-        // Privados no Lancador, e nao ha outro ponto de entrada: configuram a
-        // porta/URL e convertem o persistence.xml pendente da instalacao.
+        // Privados no Lancador, e nao ha outro ponto de entrada.
         chamarPrivadoDoLancador("configurarVariaveisBase");
         chamarPrivadoDoLancador("validarPastaInstalador");
 
         new TomCat("tomcat").startTomcat();
-        System.out.println("PJe-Calc servindo em http://localhost:9257/pjecalc");
+        // SITE sai do proprio Lancador, preenchido por configurarVariaveisBase.
+        System.out.println("PJe-Calc servindo em " + Lancador.SITE);
 
-        // Segura a main (nao-daemon) ate chegar um SIGTERM. O hook de desligamento
-        // do Catalina cuida de parar o Tomcat e fechar o H2.
+        // Segura a main ate o SIGTERM; o hook do Catalina fecha Tomcat e H2.
         new java.util.concurrent.CountDownLatch(1).await();
     }
 

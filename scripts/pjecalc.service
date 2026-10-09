@@ -1,22 +1,15 @@
-# Unidade de usuario (nao de sistema): o banco H2 fica em $HOME e o PJe-Calc so
-# atende em localhost, entao ele pertence a sessao do usuario.
-#
-#   cp scripts/pjecalc.service ~/.config/systemd/user/
-#   systemctl --user enable --now pjecalc
-#
+# Unidade de usuario: o banco H2 fica no $HOME e o servidor so atende em
+# localhost. Instalacao e uso no README, secao "Deixando o servidor de pe".
 [Unit]
 Description=PJe-Calc Cidadao (TRT 8) — servidor local em http://localhost:9257/pjecalc
 After=network.target
 
 [Service]
-# foreground: o java e o processo principal da unidade, sem setsid nem pidfile.
 ExecStart=%h/.local/share/pjecalc/pjecalc.sh foreground
-# Em SIGTERM a JVM roda os hooks de desligamento e sai com 143; para o systemd
-# isso e saida normal, nao falha.
+# Em SIGTERM a JVM sai com 143 depois de rodar os hooks: saida normal.
 SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
-# O Tomcat leva ~10 s para publicar o contexto; o H2 as vezes demora a fechar.
 TimeoutStopSec=30
 
 [Install]

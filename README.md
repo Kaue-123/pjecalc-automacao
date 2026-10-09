@@ -48,13 +48,12 @@ ele cai numa `JFrame` com dois botões, "Abrir o PjeCalc" e "Sair", que fica
 parada na tela sem servir para nada em uso automatizado.
 
 Daí `scripts/servico/PjeCalcServico.java`: repete as duas primeiras etapas,
-chamando por reflexão os métodos privados do `Lancador` que preparam o ambiente,
-e para antes da terceira. O `pjecalc.sh` o compila na primeira execução.
+chamando por reflexão os métodos privados do `Lancador`, e para antes da
+terceira.
 
 O que a janela fazia de útil era **segurar a JVM viva** — as threads do Tomcat
-embarcado aqui são daemon, quem não deixava o processo morrer era a thread de
-eventos do AWT. Por isso a `main` do `PjeCalcServico` fica bloqueada até chegar
-um `SIGTERM`; o hook de desligamento do Catalina para o Tomcat e fecha o H2.
+embarcado são daemon, quem não deixava o processo morrer era a thread de eventos
+do AWT. No lugar dela, a `main` fica bloqueada até chegar um `SIGTERM`.
 
 Sem AWT, `-Djava.awt.headless=true` deixa de ser problema: ninguém mais chama
 `SplashScreen.getSplashScreen()`, que era o que estourava `HeadlessException` no
@@ -94,8 +93,7 @@ PJECALC_TR_ATE=03/2027 PJECALC_IPCAE_ATE=02/2027 .venv/bin/python busca_indices_
 
 Numa rodada normal a pasta fica só com as duas planilhas. `PJECALC_DEBUG=1`
 acrescenta screenshot e dump de DOM a cada etapa, úteis quando o PJe-Calc muda
-de layout e algum seletor quebra. As capturas de **falha** saem sempre, com ou
-sem a variável: é o único registro visual do que a tela mostrava quando quebrou.
+de layout e algum seletor quebra; as capturas de **falha** saem sempre.
 
 ### Deixando o servidor de pé sozinho
 
@@ -120,28 +118,18 @@ A extração inteira — subir o servidor, conferir a versão do PJe-Calc, extra
 avisar — roda sozinha uma vez por mês:
 
 ```bash
-cp scripts/pjecalc-indices.{service,timer} ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now pjecalc-indices.timer
-systemctl --user list-timers pjecalc-indices.timer
+./scripts/instalar-automacao.sh
 ```
+
+Ele escreve as unidades em `~/.config/systemd/user/` com o caminho real do
+repositório e habilita o timer. Rode de novo se mover o repositório de lugar.
 
 **Quando roda:** dia 6 às 11h; se cair no fim de semana, na segunda seguinte.
 
-O systemd não sabe o que é dia útil, então o timer dispara nos dias 6, 7 e 8, só
-de segunda a sexta, e um marcador em `~/.local/state/pjecalc-automacao/` guarda
-o mês já executado — a primeira das três datas roda, as outras saem na hora.
-Os três dias cobrem os casos:
-
-| Dia 6 cai em | Dispara em | Roda em |
-|---|---|---|
-| dia útil | 6 (e 7, 8 se forem úteis) | **6** |
-| sábado | 8 (segunda) | **8** |
-| domingo | 7 (segunda), 8 | **7** |
-
-Feriado não entra na conta — o systemd não tem calendário. Se a máquina estiver
-desligada na hora marcada, `Persistent=true` faz a rodada acontecer no próximo
-boot.
+O systemd não conhece dia útil, então o timer dispara nos dias 6, 7 e 8 e um
+marcador em `~/.local/state/pjecalc-automacao/` descarta as sobras. O
+`pjecalc-indices.timer` tem os casos comentados. Feriado não entra na conta; com
+a máquina desligada na hora, `Persistent=true` recupera no próximo boot.
 
 Para rodar na mão, fora da agenda:
 
@@ -152,23 +140,22 @@ systemctl --user start pjecalc-indices     # respeita o marcador do mês
 
 ### Versão do PJe-Calc
 
-Quando o TRT 8 publica uma versão nova, as tabelas e regras de cálculo mudam
-junto — e a instalação antiga continua rodando e entregando número velho, sem
-reclamar. Por isso toda rodada confere:
+Versão nova muda tabela e regra de cálculo, e a instalação antiga continua
+entregando número velho sem reclamar — por isso toda rodada confere:
 
 ```bash
 python3 scripts/verificar-versao.py
 # 0 = em dia | 1 = há versão nova | 2 = não deu para verificar
 ```
 
-Ele compara o `VERSAO` gravado pelo instalador com o que o portal do TRT 8
-anuncia, e o aviso entra na notificação do fim da rodada. Baixar e instalar
-continua sendo passo seu: o instalador tem que ser conferido contra o MD5 que o
-tribunal publica, então atualize `VERSAO` e `MD5_ESPERADO` no
-`scripts/instalar-pjecalc-linux.sh` e rode-o.
+A versão instalada vem da própria aplicação rodando, que diz o que está no ar
+agora; o arquivo `VERSAO` gravado pelo instalador é só a rede de segurança para
+quando o servidor estiver fora do ar. O aviso entra na notificação do fim da
+rodada.
 
-A unidade aponta para `%h/Projects/pjecalc-automacao`. Se o repositório estiver
-em outro lugar, ajuste o `ExecStart` do `pjecalc-indices.service`.
+Instalar continua sendo passo seu, porque o instalador tem que ser conferido
+contra o MD5 publicado pelo tribunal: atualize `VERSAO` e `MD5_ESPERADO` em
+`scripts/instalar-pjecalc-linux.sh` e rode-o.
 
 A extração roda de ponta a ponta sem intervenção. Se alguma etapa cair num
 fallback que exige mão humana, o script só pede ENTER quando há terminal
@@ -218,7 +205,7 @@ Variáveis de ambiente:
 ## Comandos do lançador
 
 ```
-pjecalc.sh start | stop | restart | status | abrir | foreground
+pjecalc.sh start | stop | restart | status | abrir | foreground | url | esperar | compilar
 ```
 
 ## Requisitos

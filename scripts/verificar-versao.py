@@ -20,31 +20,34 @@ import urllib.request
 
 PORTAL = "https://www.trt8.jus.br/pjecalc-cidadao"
 PJECALC_HOME = os.environ.get("PJECALC_HOME", os.path.expanduser("~/.local/share/pjecalc"))
+# O lancador exporta PJECALC_URL; o default so serve para rodar na mao.
+URL_APP = os.environ.get("PJECALC_URL", "http://localhost:9257/pjecalc/pages/principal.jsf")
 TIMEOUT = 30
 
 
 def versao_instalada():
     """
-    O arquivo VERSAO e escrito pelo instalador. Sem ele, sobra a propria
-    aplicacao — mas a home do PJe-Calc so mostra "Versao 2.16", sem o terceiro
-    numero, entao a comparacao fica limitada a maior.menor.
+    Pergunta primeiro a aplicacao rodando: ela diz o que esta no ar agora.
+
+    O arquivo VERSAO e rede de segurança para quando o servidor esta fora do ar
+    — ele guarda o que o instalador baixou um dia, e fica congelado se alguem
+    atualizar o PJe-Calc por fora.
     """
+    try:
+        with urllib.request.urlopen(URL_APP, timeout=10) as r:
+            html = r.read().decode("latin-1", errors="replace")
+        m = re.search(r"Vers[ãa]o:?\s*([\d.]+)", html.replace("&atilde;", "ã"))
+        if m:
+            return m.group(1), "aplicacao rodando"
+    except Exception:
+        pass
+
     arq = os.path.join(PJECALC_HOME, "VERSAO")
     if os.path.exists(arq):
         with open(arq) as f:
             v = f.read().strip()
         if v:
-            return v, "arquivo VERSAO"
-
-    try:
-        url = "http://localhost:9257/pjecalc/pages/principal.jsf"
-        with urllib.request.urlopen(url, timeout=10) as r:
-            html = r.read().decode("latin-1", errors="replace")
-        m = re.search(r"Vers&atilde;o\s*([\d.]+)", html) or re.search(r"Vers[ãa]o\s*([\d.]+)", html)
-        if m:
-            return m.group(1), "aplicacao rodando (parcial)"
-    except Exception:
-        pass
+            return v, "arquivo VERSAO (aplicacao fora do ar)"
     return None, None
 
 
@@ -69,7 +72,7 @@ def main():
     instalada, origem = versao_instalada()
     if not instalada:
         print("[ERR] Nao consegui descobrir a versao instalada.")
-        print(f"      Procurei em {PJECALC_HOME}/VERSAO e na aplicacao em localhost:9257.")
+        print(f"      Procurei em {URL_APP} e em {PJECALC_HOME}/VERSAO.")
         return 2
 
     try:
@@ -81,7 +84,7 @@ def main():
     print(f"[   ] Instalada : {instalada}  ({origem})")
     print(f"[   ] No portal : {portal}  (disponivel desde {desde})")
 
-    # A home da aplicacao so expoe maior.menor; nesse caso compara-se o que da.
+    # Se uma das fontes vier sem o terceiro numero, compara-se o que da.
     a, b = como_tupla(instalada), como_tupla(portal)
     if len(a) < len(b):
         b = b[:len(a)]

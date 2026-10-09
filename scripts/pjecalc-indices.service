@@ -1,14 +1,14 @@
-# Rodada mensal dos indices TR e IPCA-E. Disparada pelo pjecalc-indices.timer;
-# tambem serve para rodar na mao: systemctl --user start pjecalc-indices
+# Rodada mensal dos indices. Disparada pelo pjecalc-indices.timer; tambem serve
+# para rodar na mao: systemctl --user start pjecalc-indices
+#
+# __PROJETO__ e substituido pelo caminho do repositorio em instalar-automacao.sh.
 [Unit]
 Description=PJe-Calc — extracao mensal dos indices TR e IPCA-E (TRT 8)
-# O servidor precisa estar no ar, mas quem espera o contexto /pjecalc publicar
-# e o proprio script — o Tomcat leva uns 10 s depois que o processo sobe.
 Wants=pjecalc.service
 After=pjecalc.service network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/pjecalc-automacao/scripts/rodada-mensal.sh
+ExecStart=__PROJETO__/scripts/rodada-mensal.sh
 # A extracao passa de 10 min por causa da paginacao do modal.
 TimeoutStartSec=45min

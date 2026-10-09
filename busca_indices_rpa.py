@@ -8,15 +8,10 @@ FLUXO CORRETO (baseado na interface real do PJe-Calc):
   2. Home → menu Tabelas → "Correção Monetária" → filtrar datas → extrair TR
   3. Home → menu Tabelas → "Correção Monetária" → filtrar datas → extrair IPCA-E
 
-DATAS BUSCADAS (calculadas na hora de rodar):
-  - TR    : de 01/1967 ate o MES SEGUINTE ao da execucao
-  - IPCA-E: de 01/1992 ate o MES CORRENTE
-
-  Pedir um mes a frente e de proposito: o PJe-Calc nao reclama de um mes que
-  ainda nao existe, so entrega ate onde tem. Assim a planilha sai sempre
-  completa, sem depender do dia em que o TRT publicou o indice.
-  Para uma rodada fora do padrao, use PJECALC_TR_ATE / PJECALC_IPCAE_ATE
-  (formato MM/AAAA).
+DATAS BUSCADAS (calculadas na hora de rodar, ver CONFIG_INDICES):
+  - TR    : de 01/1967 ate o mes SEGUINTE ao da execucao
+  - IPCA-E: de 01/1992 ate o mes CORRENTE
+  Sobrescreva com PJECALC_TR_ATE / PJECALC_IPCAE_ATE (formato MM/AAAA).
 
 PRE-REQUISITOS:
   pip install -r requirements.txt
@@ -45,7 +40,7 @@ from selenium.common.exceptions import (
 # ─────────────────────────────────────────────
 # CONFIGURACOES
 # ─────────────────────────────────────────────
-PORTA      = 9257
+PORTA      = int(os.environ.get("PJECALC_PORTA", 9257))
 NAVEGADOR  = "firefox"    # "firefox" ou "chrome"
 TIMEOUT    = 20
 
@@ -61,9 +56,8 @@ def _mes_ano(ano, mes):
 
 HOJE_DT = datetime.now()
 
-# O TRT publica a TR do mes corrente por volta do dia 8 e a IPCA-E do mes
-# anterior por volta do dia 2. Pedir TR um mes a frente e IPCA-E no mes corrente
-# cobre os dois calendarios sem precisar saber em que dia a rodada caiu.
+# A TR do mes corrente entra por volta do dia 8 e a IPCA-E do mes anterior por
+# volta do dia 2: pedir alem do que existe cobre os dois calendarios.
 TR_ATE    = os.environ.get("PJECALC_TR_ATE")    or _mes_ano(HOJE_DT.year, HOJE_DT.month + 1)
 IPCAE_ATE = os.environ.get("PJECALC_IPCAE_ATE") or _mes_ano(HOJE_DT.year, HOJE_DT.month)
 
@@ -90,17 +84,16 @@ CONFIG_INDICES = {
     },
 }
 
-# Cada rodada tem a sua pasta, nomeada pela data com hifens. O perfil do Firefox
-# fica na raiz de output/ porque e reaproveitado entre rodadas.
+# Uma pasta por rodada. O perfil do Firefox fica na raiz de output/, porque e
+# reaproveitado entre rodadas.
 DATA_RODADA  = HOJE_DT.strftime("%d-%m-%Y")
 OUTPUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 PASTA_RODADA = os.path.join(OUTPUT_DIR, DATA_RODADA)
 ARQ_TR       = os.path.join(PASTA_RODADA, f"indices_TR_TRT8_{DATA_RODADA}.xlsx")
 ARQ_IPCAE    = os.path.join(PASTA_RODADA, f"indices_IPCAE_TRT8_{DATA_RODADA}.xlsx")
 
-# Screenshot e dump de DOM a cada etapa so com PJECALC_DEBUG=1. Sem isso, a
-# pasta da rodada fica so com as duas planilhas — mas as capturas de FALHA
-# continuam saindo sempre, que e o unico momento em que alguem vai olhar.
+# Com PJECALC_DEBUG=1 sai screenshot e DOM de cada etapa; sem ele, so as
+# capturas de falha, que numa rodada desacompanhada sao o unico registro visual.
 DEBUG = os.environ.get("PJECALC_DEBUG") == "1"
 # ─────────────────────────────────────────────
 
@@ -118,14 +111,7 @@ def err(m):  log(m, "ERR")
 def step(m): log(m, "-->")
 
 def shot(driver, nome, erro=False):
-    """
-    Captura a tela na pasta da rodada.
-
-    Nas etapas que deram certo isso so acontece com PJECALC_DEBUG=1 — numa
-    rodada mensal desacompanhada ninguem vai abrir 18 imagens de coisa que
-    funcionou. Quando `erro` e True a captura sai sempre: e o unico registro
-    visual do que a tela mostrava na hora em que quebrou.
-    """
+    """Captura a tela na pasta da rodada; so com DEBUG, exceto erro=True."""
     if not (DEBUG or erro):
         return
     try:
@@ -181,7 +167,7 @@ def voltar_home(driver):
 
 
 def dump_dom(driver, nome, erro=False):
-    """Salva o HTML da tela atual na pasta da rodada, para inspecao dos seletores."""
+    """Salva o HTML da tela; mesma regra do shot(). Serve para rever seletores."""
     if not (DEBUG or erro):
         return
     try:
@@ -224,9 +210,8 @@ def criar_driver():
         options.add_argument("-no-remote")
         options.add_argument("-profile")
         options.add_argument(perfil_dir)
-        # PJECALC_FF_HEADLESS=1 roda sem janela, para nao tomar o foco de quem
-        # esta usando a maquina. O Firefox headless desenha normalmente (as
-        # capturas de tela continuam saindo); o que some e a janela no monitor.
+        # Sem janela, para nao tomar o foco de quem esta usando a maquina. O
+        # Firefox headless desenha normalmente: as capturas continuam saindo.
         if os.environ.get("PJECALC_FF_HEADLESS") == "1":
             options.add_argument("-headless")
         drv = webdriver.Firefox(service=Service(GeckoDriverManager().install()), options=options)
