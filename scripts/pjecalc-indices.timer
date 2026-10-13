@@ -6,11 +6,14 @@
 #   6 em dia util -> roda no 6     6 no sabado -> roda no 8     6 no domingo -> roda no 7
 #
 # Feriado nao entra na conta: o systemd nao tem calendario.
+#
+# O fuso vai explicito porque servidor costuma rodar em UTC, e ai "11:00" seria
+# 8h da manha no Brasil.
 [Unit]
 Description=Dispara a extracao mensal dos indices do TRT 8
 
 [Timer]
-OnCalendar=Mon..Fri *-*-06,07,08 11:00:00
+OnCalendar=Mon..Fri *-*-06,07,08 11:00:00 America/Sao_Paulo
 # Maquina desligada na hora marcada: roda assim que ligar.
 Persistent=true
 # Evita bater no portal do TRT no mesmo segundo que todo mundo.

@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def recarregar(**env):
     """Recarrega o modulo com o ambiente dado, isolando as variaveis."""
     anterior = {}
-    for k in ("PJECALC_TR_ATE", "PJECALC_IPCAE_ATE", "PJECALC_PORTA", "PJECALC_DEBUG"):
+    for k in ("PJECALC_TR_ATE", "PJECALC_IPCAE_ATE", "PJECALC_PORTA", "PJECALC_DEBUG",
+              "PJECALC_FF_HEADLESS", "DISPLAY", "WAYLAND_DISPLAY"):
         anterior[k] = os.environ.pop(k, None)
     os.environ.update({k: v for k, v in env.items() if v is not None})
     try:
@@ -93,6 +94,23 @@ class TestDebug(unittest.TestCase):
 
     def test_ligado_pela_env(self):
         self.assertTrue(recarregar(PJECALC_DEBUG="1").DEBUG)
+
+
+class TestJanelaDoNavegador(unittest.TestCase):
+    """Num servidor nao ha display: o padrao tem que ser sem janela."""
+
+    def test_sem_display_roda_sem_janela(self):
+        self.assertTrue(recarregar().SEM_JANELA)
+
+    def test_com_display_mantem_a_janela(self):
+        self.assertFalse(recarregar(DISPLAY=":0").SEM_JANELA)
+
+    def test_com_wayland_mantem_a_janela(self):
+        self.assertFalse(recarregar(WAYLAND_DISPLAY="wayland-1").SEM_JANELA)
+
+    def test_env_vence_o_padrao(self):
+        self.assertTrue(recarregar(DISPLAY=":0", PJECALC_FF_HEADLESS="1").SEM_JANELA)
+        self.assertFalse(recarregar(PJECALC_FF_HEADLESS="0").SEM_JANELA)
 
 
 class TestPorta(unittest.TestCase):

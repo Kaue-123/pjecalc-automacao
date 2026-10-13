@@ -16,8 +16,23 @@ export PJECALC_URL="$("$LANCADOR" url)"
 
 mkdir -p "$ESTADO"
 
+# O aviso sempre fica registrado em arquivo e no journal. O canal externo e
+# extra: notify-send so existe em sessao grafica, e num servidor sumiria calado
+# justamente no caso que importa, que e o de falha.
 avisar() {  # titulo, corpo, urgencia
-  notify-send -a "PJe-Calc" -u "${3:-normal}" "$1" "$2" 2>/dev/null || true
+  local titulo="$1" corpo="$2" urgencia="${3:-normal}"
+  printf '%s\n[%s] %s\n%s\n' "$(date '+%d/%m/%Y %H:%M:%S')" "$urgencia" "$titulo" "$corpo" \
+    > "$ESTADO/ultimo-aviso"
+  echo "AVISO [$urgencia] $titulo"
+  echo "$corpo" | sed 's/^/       /'
+
+  if [ -n "${PJECALC_AVISO_CMD:-}" ]; then
+    PJECALC_AVISO_TITULO="$titulo" PJECALC_AVISO_CORPO="$corpo" \
+    PJECALC_AVISO_URGENCIA="$urgencia" sh -c "$PJECALC_AVISO_CMD" \
+      || echo "AVISO: o canal externo PJECALC_AVISO_CMD falhou"
+  elif [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v notify-send > /dev/null; then
+    notify-send -a "PJe-Calc" -u "$urgencia" "$titulo" "$corpo" || true
+  fi
 }
 
 falhar() {

@@ -183,13 +183,16 @@ O script abre uma **janela dedicada do Firefox**, com perfil isolado e
 `-no-remote`. Não a feche enquanto estiver rodando — sem isso o Firefox gruda
 numa janela já aberta, encerra com status 0 e o geckodriver perde a sessão.
 
+Para instalar num servidor — onde não há sessão gráfica e o fuso costuma ser
+UTC — veja [`docs/servidor.md`](docs/servidor.md).
+
 ## Testes
 
 ```bash
 ./tests/rodar.sh
 ```
 
-77 testes, sem rede e sem subir o PJe-Calc — tudo que toca o mundo (`curl`,
+97 testes, sem rede e sem subir o PJe-Calc — tudo que toca o mundo (`curl`,
 `systemctl`, `notify-send`, o lançador, a extração) está substituído por dublê.
 
 | Arquivo | Cobre |
@@ -232,7 +235,8 @@ Variáveis de ambiente:
 | Variável | Para quê |
 |---|---|
 | `PJECALC_TR_ATE` / `PJECALC_IPCAE_ATE` | `MM/AAAA` final, no lugar do calculado |
-| `PJECALC_FF_HEADLESS=1` | Firefox sem janela, para rodada desacompanhada |
+| `PJECALC_FF_HEADLESS` | `1` força Firefox sem janela, `0` força com; sem a variável, decide pelo `DISPLAY` |
+| `PJECALC_AVISO_CMD` | comando que recebe o aviso do fim da rodada (servidor) |
 | `PJECALC_DEBUG=1` | screenshot e dump de DOM a cada etapa |
 | `PJECALC_HOME` | instalação do PJe-Calc (padrão `~/.local/share/pjecalc`) |
 

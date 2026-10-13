@@ -95,6 +95,14 @@ ARQ_IPCAE    = os.path.join(PASTA_RODADA, f"indices_IPCAE_TRT8_{DATA_RODADA}.xls
 # Com PJECALC_DEBUG=1 sai screenshot e DOM de cada etapa; sem ele, so as
 # capturas de falha, que numa rodada desacompanhada sao o unico registro visual.
 DEBUG = os.environ.get("PJECALC_DEBUG") == "1"
+
+# Sem display nao da para abrir janela: num servidor o padrao tem que ser sem
+# ela. Com sessao grafica, o padrao continua sendo a janela visivel, que e o que
+# ajuda quem esta depurando. PJECALC_FF_HEADLESS=0/1 decide explicitamente.
+SEM_JANELA = os.environ.get(
+    "PJECALC_FF_HEADLESS",
+    "0" if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) else "1",
+) == "1"
 # ─────────────────────────────────────────────
 
 HOME = f"http://localhost:{PORTA}/pjecalc/pages/principal.jsf"
@@ -210,9 +218,8 @@ def criar_driver():
         options.add_argument("-no-remote")
         options.add_argument("-profile")
         options.add_argument(perfil_dir)
-        # Sem janela, para nao tomar o foco de quem esta usando a maquina. O
-        # Firefox headless desenha normalmente: as capturas continuam saindo.
-        if os.environ.get("PJECALC_FF_HEADLESS") == "1":
+        # Headless desenha normalmente: as capturas continuam saindo.
+        if SEM_JANELA:
             options.add_argument("-headless")
         drv = webdriver.Firefox(service=Service(GeckoDriverManager().install()), options=options)
     else:

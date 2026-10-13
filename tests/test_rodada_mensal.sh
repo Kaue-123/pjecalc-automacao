@@ -79,9 +79,15 @@ EOF
   chmod +x "$PJECALC_HOME/pjecalc.sh" "$CENARIO"/bin/* "$CENARIO/projeto/.venv/bin/python"
   export CENARIO PATH="$CENARIO/bin:$PATH"
   export STUB_PASTA="$CENARIO/projeto/output/01-01-2027"
+  # sem barramento por padrao: e o cenario de servidor
+  unset DBUS_SESSION_BUS_ADDRESS PJECALC_AVISO_CMD
 }
 
-desmontar() { rm -rf "$CENARIO"; unset STUB_CURL STUB_ESPERAR STUB_VERSAO STUB_EXTRACAO STUB_PASTA; }
+desmontar() { rm -rf "$CENARIO"
+  unset STUB_CURL STUB_ESPERAR STUB_VERSAO STUB_EXTRACAO STUB_PASTA \
+        DBUS_SESSION_BUS_ADDRESS PJECALC_AVISO_CMD; }
+
+aviso_registrado() { cat "$XDG_STATE_HOME/pjecalc-automacao/ultimo-aviso" 2>/dev/null; }
 
 rodar() { "$CENARIO/projeto/scripts/rodada-mensal.sh" "$@" > "$CENARIO/saida.txt" 2>&1; echo $?; }
 
@@ -121,7 +127,7 @@ desmontar
 echo
 echo "== caminho feliz =="
 
-montar
+montar; export DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $([ "$COD" = "0" ]; echo $?) "rodada completa sai com 0"
 afirmar $([ "$(marcador)" = "$(date +%Y-%m)" ]; echo $?) "grava o marcador do mes"
@@ -136,14 +142,14 @@ echo "== a pasta e a que o Python disse, nao a que o shell adivinharia =="
 montar
 export STUB_PASTA="$CENARIO/projeto/output/31-12-1999"
 COD=$(rodar)
-afirmar $(notificacoes | grep -q "31-12-1999"; echo $?) "shell usa a pasta informada, mesmo com data improvavel"
-afirmar $(! notificacoes | grep -q "$(date +%d-%m-%Y)"; echo $?) "shell nao recalcula a data por conta propria"
+afirmar $(aviso_registrado | grep -q "31-12-1999"; echo $?) "shell usa a pasta informada, mesmo com data improvavel"
+afirmar $(! aviso_registrado | grep -q "$(date +%d-%m-%Y)"; echo $?) "shell nao recalcula a data por conta propria"
 desmontar
 
 echo
 echo "== falhas =="
 
-montar; export STUB_EXTRACAO=1
+montar; export STUB_EXTRACAO=1 DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $([ "$COD" = "1" ]; echo $?) "extracao falhou: sai com 1"
 afirmar $([ -z "$(marcador)" ]; echo $?) "extracao falhou: NAO grava o marcador (mes continua pendente)"
@@ -151,7 +157,7 @@ afirmar $(notificacoes | grep -q "falhou"; echo $?) "extracao falhou: notifica"
 afirmar $(notificacoes | grep -q "critical"; echo $?) "extracao falhou: notificacao e critica"
 desmontar
 
-montar; export STUB_CURL=1 STUB_ESPERAR=1
+montar; export STUB_CURL=1 STUB_ESPERAR=1 DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $([ "$COD" = "1" ]; echo $?) "servidor nao sobe: sai com 1"
 afirmar $(notificacoes | grep -q "nao subiu"; echo $?) "servidor nao sobe: diz o motivo"
@@ -166,21 +172,67 @@ desmontar
 echo
 echo "== aviso de versao entra na notificacao =="
 
-montar; export STUB_VERSAO=1
+montar; export STUB_VERSAO=1 DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $([ "$COD" = "0" ]; echo $?) "versao nova nao interrompe a rodada"
 afirmar $(notificacoes | grep -q "Versao nova"; echo $?) "versao nova aparece na notificacao"
 desmontar
 
-montar; export STUB_VERSAO=2
+montar; export STUB_VERSAO=2 DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $([ "$COD" = "0" ]; echo $?) "falha ao verificar versao nao interrompe a rodada"
 afirmar $(notificacoes | grep -q "Nao foi possivel conferir"; echo $?) "falha ao verificar aparece na notificacao"
 desmontar
 
-montar; export STUB_VERSAO=0
+montar; export STUB_VERSAO=0 DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
 COD=$(rodar)
 afirmar $(! notificacoes | grep -qi "versao"; echo $?) "versao em dia nao polui a notificacao"
+desmontar
+
+echo
+echo "== aviso num servidor (sem sessao grafica) =="
+
+montar
+COD=$(rodar)
+afirmar $([ "$COD" = "0" ]; echo $?) "sem barramento a rodada termina normalmente"
+afirmar $([ -z "$(notificacoes)" ]; echo $?) "sem barramento nao chama notify-send"
+afirmar $(aviso_registrado | grep -q "01-01-2027"; echo $?) "o aviso fica registrado em arquivo mesmo assim"
+afirmar $(grep -q "AVISO" "$CENARIO/saida.txt"; echo $?) "e tambem no journal"
+desmontar
+
+montar; export STUB_EXTRACAO=1
+COD=$(rodar)
+afirmar $([ "$COD" = "1" ]; echo $?) "falha sem barramento continua saindo com 1"
+afirmar $(aviso_registrado | grep -q "critical"; echo $?) "falha sem barramento fica registrada como critica"
+desmontar
+
+montar
+export PJECALC_AVISO_CMD='printf "%s|%s|%s\n" "$PJECALC_AVISO_TITULO" "$PJECALC_AVISO_URGENCIA" "$PJECALC_AVISO_CORPO" >> "$CENARIO/canal.txt"'
+COD=$(rodar)
+afirmar $([ "$COD" = "0" ]; echo $?) "canal externo nao atrapalha a rodada"
+afirmar $(grep -q "planilhas prontas" "$CENARIO/canal.txt" 2>/dev/null; echo $?) "canal externo recebe o titulo"
+afirmar $(grep -q "01-01-2027" "$CENARIO/canal.txt" 2>/dev/null; echo $?) "canal externo recebe o corpo"
+desmontar
+
+montar; export STUB_EXTRACAO=1
+export PJECALC_AVISO_CMD='printf "%s\n" "$PJECALC_AVISO_URGENCIA" >> "$CENARIO/canal.txt"'
+COD=$(rodar)
+afirmar $(grep -q "critical" "$CENARIO/canal.txt" 2>/dev/null; echo $?) "canal externo recebe urgencia critica na falha"
+desmontar
+
+montar
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
+export PJECALC_AVISO_CMD='echo ignorado >> "$CENARIO/canal.txt"'
+COD=$(rodar)
+afirmar $([ -s "$CENARIO/canal.txt" ]; echo $?) "com os dois, o canal externo e quem recebe"
+afirmar $([ -z "$(notificacoes)" ]; echo $?) "com canal externo, notify-send nao e chamado"
+desmontar
+
+montar; export DBUS_SESSION_BUS_ADDRESS="unix:path=/fake"
+export PJECALC_AVISO_CMD='exit 1'
+COD=$(rodar)
+afirmar $([ "$COD" = "0" ]; echo $?) "canal externo quebrado nao derruba a rodada"
+afirmar $(grep -q "canal externo.*falhou" "$CENARIO/saida.txt"; echo $?) "canal externo quebrado e reportado"
 desmontar
 
 echo

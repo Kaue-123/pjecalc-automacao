@@ -35,10 +35,11 @@ def primeiro_dia_util_a_partir_de(ano, mes, dia):
     return d
 
 
-def disparos(expressao, iteracoes):
+def disparos(expressao, iteracoes, tz=None):
+    ambiente = dict(os.environ, TZ=tz) if tz else None
     saida = subprocess.run(
         ["systemd-analyze", "calendar", f"--iterations={iteracoes}", expressao],
-        capture_output=True, text=True, check=True).stdout
+        capture_output=True, text=True, check=True, env=ambiente).stdout
     datas = []
     for linha in saida.splitlines():
         if "Next elapse" in linha or "Iteration" in linha:
@@ -59,6 +60,16 @@ class TestAgenda(unittest.TestCase):
 
     def test_horario_e_11h(self):
         self.assertIn("11:00:00", self.expressao)
+
+    def test_fuso_vai_explicito(self):
+        """Servidor costuma rodar em UTC, e ai '11:00' seria 8h no Brasil."""
+        self.assertIn("America/", self.expressao)
+
+    def test_agenda_nao_muda_se_a_maquina_estiver_em_utc(self):
+        sob_utc = disparos(self.expressao, 12, tz="UTC")
+        sob_local = disparos(self.expressao, 12)
+        self.assertEqual(sob_utc, sob_local,
+                         "a rodada mudaria de dia conforme o fuso do host")
 
     def test_nunca_dispara_em_fim_de_semana(self):
         fds = [d for d in self.datas if d.weekday() >= 5]
