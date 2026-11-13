@@ -26,10 +26,15 @@ Dispon&iacute;vel desde: <strong>25/06/2026</strong></h3>
 PAGINA_APP = 'alt="Versao">Vers&atilde;o: 2.16.0</span>'
 
 
+PAGINA_INSTALACAO = """
+<a href="/files/pjecalc-2.16.0-instalador-x64.exe">x64</a> MD5 a379...
+<a href="/files/pjecalc-2.16.0-instalador-x32.exe">x32</a> MD5 0f90...
+"""
+
+
 class TestLeituraDoPortal(unittest.TestCase):
     def ler(self, html):
-        with mock.patch.object(vv.urllib.request, "urlopen") as m:
-            m.return_value.__enter__.return_value.read.return_value = html.encode()
+        with mock.patch.object(vv, "_baixar", return_value=html):
             return vv.versao_do_portal()
 
     def test_extrai_versao_e_data(self):
@@ -39,6 +44,29 @@ class TestLeituraDoPortal(unittest.TestCase):
         """Sem o trecho esperado tem que estourar, nao devolver palpite."""
         with self.assertRaises(ValueError):
             self.ler("<h3>Nenhuma informacao de versao aqui</h3>")
+
+
+class TestLeituraDoInstalador(unittest.TestCase):
+    """Segunda fonte: o arquivo que o TRT publica para download."""
+
+    def ler(self, html):
+        with mock.patch.object(vv, "_baixar", return_value=html):
+            return vv.versao_do_instalador()
+
+    def test_extrai_a_versao_do_nome_do_arquivo(self):
+        self.assertEqual(self.ler(PAGINA_INSTALACAO), "2.16.0")
+
+    def test_pega_a_maior_quando_ha_varias(self):
+        html = PAGINA_INSTALACAO + '<a>pjecalc-2.17.0-instalador-x64.exe</a>'
+        self.assertEqual(self.ler(html), "2.17.0")
+
+    def test_comparacao_numerica_e_nao_textual(self):
+        html = '<a>pjecalc-2.9.0-instalador-x64.exe</a><a>pjecalc-2.10.0-instalador-x64.exe</a>'
+        self.assertEqual(self.ler(html), "2.10.0")
+
+    def test_pagina_sem_instalador_falha_alto(self):
+        with self.assertRaises(ValueError):
+            self.ler("<p>pagina reformulada, sem link de download</p>")
 
 
 class TestVersaoInstalada(unittest.TestCase):
@@ -73,9 +101,11 @@ class TestVersaoInstalada(unittest.TestCase):
 
 
 class TestComparacao(unittest.TestCase):
-    def rodar(self, instalada, portal):
+    def rodar(self, instalada, portal, instalador=None):
+        instalador = instalador or portal
         with mock.patch.object(vv, "versao_instalada", return_value=(instalada, "teste")), \
-             mock.patch.object(vv, "versao_do_portal", return_value=(portal, "01/01/2026")):
+             mock.patch.object(vv, "versao_do_portal", return_value=(portal, "01/01/2026")), \
+             mock.patch.object(vv, "versao_do_instalador", return_value=instalador):
             return vv.main()
 
     def test_igual_esta_em_dia(self):
@@ -101,16 +131,52 @@ class TestComparacao(unittest.TestCase):
         self.assertEqual(self.rodar("2.16", "2.17.0"), 1)
 
 
+class TestCruzamentoDasFontes(unittest.TestCase):
+    """
+    O portal e a pagina de instalacao podem discordar: o TRT pode publicar o
+    instalador novo e esquecer de trocar o texto "Versao Atual". Nesse caso o
+    aviso tem que sair mesmo assim.
+    """
+
+    def rodar(self, instalada, portal, instalador):
+        with mock.patch.object(vv, "versao_instalada", return_value=(instalada, "teste")), \
+             mock.patch.object(vv, "versao_do_portal", return_value=(portal, "01/01/2026")), \
+             mock.patch.object(vv, "versao_do_instalador", return_value=instalador):
+            return vv.main()
+
+    def test_instalador_novo_com_texto_velho_ainda_avisa(self):
+        self.assertEqual(self.rodar("2.16.0", "2.16.0", "2.17.0"), 1)
+
+    def test_texto_novo_com_instalador_velho_tambem_avisa(self):
+        self.assertEqual(self.rodar("2.16.0", "2.17.0", "2.16.0"), 1)
+
+    def test_fontes_de_acordo_e_em_dia(self):
+        self.assertEqual(self.rodar("2.16.0", "2.16.0", "2.16.0"), 0)
+
+
 class TestFalhas(unittest.TestCase):
     def test_versao_instalada_desconhecida_sai_2(self):
         with mock.patch.object(vv, "versao_instalada", return_value=(None, None)):
             self.assertEqual(vv.main(), 2)
 
-    def test_portal_inacessivel_sai_2(self):
+    def test_as_duas_fontes_fora_sai_2(self):
         """Nao pode sair 0: 'nao consegui verificar' nao e 'esta em dia'."""
         with mock.patch.object(vv, "versao_instalada", return_value=("2.16.0", "teste")), \
-             mock.patch.object(vv, "versao_do_portal", side_effect=OSError("sem rede")):
+             mock.patch.object(vv, "versao_do_portal", side_effect=OSError("sem rede")), \
+             mock.patch.object(vv, "versao_do_instalador", side_effect=OSError("sem rede")):
             self.assertEqual(vv.main(), 2)
+
+    def test_uma_fonte_fora_segue_com_a_outra(self):
+        with mock.patch.object(vv, "versao_instalada", return_value=("2.16.0", "teste")), \
+             mock.patch.object(vv, "versao_do_portal", side_effect=OSError("fora")), \
+             mock.patch.object(vv, "versao_do_instalador", return_value="2.16.0"):
+            self.assertEqual(vv.main(), 0)
+
+    def test_uma_fonte_fora_e_a_outra_mostrando_versao_nova_avisa(self):
+        with mock.patch.object(vv, "versao_instalada", return_value=("2.16.0", "teste")), \
+             mock.patch.object(vv, "versao_do_portal", side_effect=OSError("fora")), \
+             mock.patch.object(vv, "versao_do_instalador", return_value="2.17.0"):
+            self.assertEqual(vv.main(), 1)
 
 
 if __name__ == "__main__":

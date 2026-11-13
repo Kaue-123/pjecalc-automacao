@@ -150,7 +150,14 @@ python3 scripts/verificar-versao.py
 
 A versão instalada vem da própria aplicação rodando, que diz o que está no ar
 agora; o arquivo `VERSAO` gravado pelo instalador é só a rede de segurança para
-quando o servidor estiver fora do ar. O aviso entra na notificação do fim da
+quando o servidor estiver fora do ar.
+
+Do lado do TRT, **duas fontes são cruzadas**: o texto "Versão Atual" do portal e
+o nome do instalador publicado na página de instalação. A segunda existe porque
+o tribunal precisa trocar o arquivo para a versão nova ficar baixável — então
+ela pega o caso de publicarem a versão e esquecerem de mexer no texto. Se as
+duas discordarem, vale a maior e a divergência é reportada; se só uma responder,
+a conferência segue com ela e diz isso. O aviso entra na notificação do fim da
 rodada.
 
 Instalar continua sendo passo seu, porque o instalador tem que ser conferido
