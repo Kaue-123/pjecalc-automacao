@@ -37,10 +37,22 @@ ARGS_JVM=(
 [ -x "$JAVA" ] || { echo "Java 8 nao encontrado em $JAVA_HOME_8"; \
   echo "Instale com: mise install java@temurin-8.0.504+1"; exit 1; }
 
-rodando() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+# Sob systemd nao ha pidfile: o modo foreground de proposito nao escreve um.
+# Olhar so o pid faria o `status` dizer "parado" com o servico no ar, e o `start`
+# tentar subir uma segunda JVM para brigar pela porta e pelo banco H2.
+sob_systemd() { systemctl --user is-active --quiet pjecalc.service 2>/dev/null; }
+
+rodando() {
+  sob_systemd && return 0
+  [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+quem_controla() {
+  if sob_systemd; then echo "systemd"; else echo "pid $(cat "$PIDFILE" 2>/dev/null)"; fi
+}
 
 start() {
-  if rodando; then echo "Ja esta rodando (pid $(cat "$PIDFILE")). URL: $URL"; return 0; fi
+  if rodando; then echo "Ja esta rodando ($(quem_controla)). URL: $URL"; return 0; fi
   cd "$APP_DIR"
   [ -f "$CLASSES_SERVICO/PjeCalcServico.class" ] || compilar_servico
   # setsid: solta o processo numa sessao propria, para ele nao morrer junto com
@@ -70,6 +82,11 @@ compilar_servico() {
 }
 
 stop() {
+  if sob_systemd; then
+    echo "Sob systemd — parando a unidade."
+    systemctl --user stop pjecalc.service
+    return 0
+  fi
   if ! rodando; then echo "Nao esta rodando."; rm -f "$PIDFILE"; return 0; fi
   kill "$(cat "$PIDFILE")"
   for _ in $(seq 1 20); do rodando || break; sleep 1; done
@@ -89,7 +106,7 @@ case "${1:-start}" in
   foreground) foreground ;;
   stop)    stop ;;
   restart) stop; start ;;
-  status)  if rodando; then echo "rodando (pid $(cat "$PIDFILE")) — $URL"; else echo "parado"; fi ;;
+  status)  if rodando; then echo "rodando ($(quem_controla)) — $URL"; else echo "parado"; fi ;;
   abrir)   start && xdg-open "$URL" >/dev/null 2>&1 & ;;
   url)     echo "$URL" ;;
   esperar) esperar && echo "no ar" || { echo "sem resposta em $URL"; exit 1; } ;;

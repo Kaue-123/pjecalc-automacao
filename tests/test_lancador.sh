@@ -21,11 +21,20 @@ montar() {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$CENARIO/jdk/bin/java"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$CENARIO/jdk/bin/javac"
   printf '#!/usr/bin/env bash\nexit "${STUB_CURL:-0}"\n' > "$CENARIO/bin/curl"
+  # systemctl: STUB_SYSTEMD=0 finge unidade ativa; qualquer outro valor, inativa.
+  cat > "$CENARIO/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *" is-active "*) exit "${STUB_SYSTEMD:-1}" ;;
+  *" stop "*)      echo "$*" >> "$CENARIO/systemctl.txt"; exit 0 ;;
+esac
+exit 0
+EOF
   chmod +x "$CENARIO/jdk/bin"/* "$CENARIO/bin"/* "$CENARIO/app/pjecalc.sh"
-  export PJECALC_JAVA_HOME="$CENARIO/jdk" PATH="$CENARIO/bin:$PATH"
+  export CENARIO PJECALC_JAVA_HOME="$CENARIO/jdk" PATH="$CENARIO/bin:$PATH"
   LANCADOR="$CENARIO/app/pjecalc.sh"
 }
-desmontar() { rm -rf "$CENARIO"; unset STUB_CURL PJECALC_PORTA PJECALC_TENTATIVAS; }
+desmontar() { rm -rf "$CENARIO"; unset STUB_CURL PJECALC_PORTA PJECALC_TENTATIVAS STUB_SYSTEMD; }
 
 echo "== endereco =="
 montar
@@ -48,6 +57,25 @@ montar
 export STUB_CURL=1 PJECALC_TENTATIVAS=1
 "$LANCADOR" esperar > /dev/null 2>&1
 afirmar $([ $? -ne 0 ]; echo $?) "esperar sai diferente de 0 quando nada responde"
+desmontar
+
+echo
+echo "== estado sob systemd =="
+montar; export STUB_SYSTEMD=0
+afirmar $("$LANCADOR" status | grep -q "rodando (systemd)"; echo $?) \
+  "status enxerga a unidade ativa, mesmo sem pidfile"
+afirmar $("$LANCADOR" start | grep -q "Ja esta rodando"; echo $?) \
+  "start nao sobe uma segunda JVM com a unidade ativa"
+afirmar $([ ! -f "$CENARIO/app/.pjecalc.pid" ]; echo $?) \
+  "start sob systemd nao deixa pidfile para tras"
+"$LANCADOR" stop > /dev/null 2>&1
+afirmar $(grep -q "stop pjecalc.service" "$CENARIO/systemctl.txt" 2>/dev/null; echo $?) \
+  "stop delega para o systemd em vez de matar pid"
+desmontar
+
+montar; export STUB_SYSTEMD=1
+afirmar $("$LANCADOR" status | grep -q "parado"; echo $?) \
+  "sem unidade ativa e sem pid, status diz parado"
 desmontar
 
 echo
