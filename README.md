@@ -70,7 +70,7 @@ nenhum. Quem ainda precisa de display é o Firefox da automação.
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 # 3. extração
-.venv/bin/python busca_indices_rpa.py
+.venv/bin/python -m pjecalc
 ```
 
 Cada rodada tem a sua pasta, nomeada pela data:
@@ -88,7 +88,7 @@ só entrega até onde tem, e aí a planilha sai completa independentemente do di
 em que o TRT publicou o índice. Para uma rodada fora do padrão:
 
 ```bash
-PJECALC_TR_ATE=03/2027 PJECALC_IPCAE_ATE=02/2027 .venv/bin/python busca_indices_rpa.py
+PJECALC_TR_ATE=03/2027 PJECALC_IPCAE_ATE=02/2027 .venv/bin/python -m pjecalc
 ```
 
 Numa rodada normal a pasta fica só com as duas planilhas. `PJECALC_DEBUG=1`
@@ -169,12 +169,16 @@ fallback que exige mão humana, o script só pede ENTER quando há terminal
 interativo; sem TTY ele falha dizendo qual etapa não foi automatizada, em vez de
 travar esperando uma tecla que não vem.
 
+A extração sai com **0 só quando as duas planilhas foram gravadas**; qualquer
+outro desfecho sai com 1. Quem chama olha o código de saída, e um sucesso falso
+aqui vira mês sem índice sem ninguém notar.
+
 ### Seletores da tela de índices
 
 Os campos de data são `rich-calendar-input` do RichFaces e o "Pesquisar" é um
 `<a>` com `A4J.AJAX.Submit`, não um `input[type=submit]`. Os ids estão em
-`CONFIG_INDICES`, e mudam entre as abas — repare que a TR carrega `Indice` no
-meio do id e a IPCA-E não:
+`pjecalc/model/indice.py`, e mudam entre as abas — repare que a TR carrega
+`Indice` no meio do id e a IPCA-E não:
 
 | | TR | IPCA-E |
 |---|---|---|
@@ -193,18 +197,57 @@ numa janela já aberta, encerra com status 0 e o geckodriver perde a sessão.
 Para instalar num servidor — onde não há sessão gráfica e o fuso costuma ser
 UTC — veja [`docs/servidor.md`](docs/servidor.md).
 
+## Arquitetura
+
+O código está separado em camadas, no formato MVC: o domínio não conhece o
+Selenium, a saída no terminal mora num lugar só e o controlador é quem conhece
+a ordem das etapas.
+
+```
+pjecalc/
+├── config.py                  configuração da rodada, lida do ambiente
+├── model/                     domínio puro — nada de Selenium aqui
+│   ├── competencia.py         MM/AAAA e a virada de ano
+│   ├── indice.py              TR e IPCA-E: intervalo e ids JSF
+│   └── tabela.py              registros extraídos, deduplicação, cabeçalhos
+├── view/
+│   └── console.py             tudo que é escrito para quem lê a rodada
+├── controller/
+│   └── extracao.py            a ordem das etapas e o código de saída
+└── infra/                     adaptadores para o mundo
+    ├── navegador.py           o driver, a sessão e as capturas de evidência
+    ├── planilha.py            gravação do .xlsx
+    └── paginas/               um objeto por tela do PJe-Calc
+        ├── menu.py            menu lateral de principal.jsf
+        ├── atualizacao.py     "Atualização de Tabelas e Índices"
+        ├── correcao_monetaria.py   abas, filtros de data e "Pesquisar"
+        └── grade.py           leitura paginada do modal ou da tabela da página
+```
+
+A divisão não é enfeite: as regras que custaram caro — qual mês pedir, o que é
+linha de dado e o que é cabeçalho repetido, quando a paginação acabou — saíram
+do meio do laço do Selenium e viraram código testável sem navegador. O que
+**precisa** de navegador ficou em `infra/paginas`, um objeto por tela, cada um
+com os seletores e as armadilhas daquela tela ao lado do código que as evita.
+
+As duas grades de resultado (o modal do RichFaces e a tabela desenhada na
+página) expõem a mesma interface — cabeçalhos, linhas, próxima página — e o
+laço de paginação é escrito uma vez só, sem saber em qual das duas está.
+
 ## Testes
 
 ```bash
 ./tests/rodar.sh
 ```
 
-97 testes, sem rede e sem subir o PJe-Calc — tudo que toca o mundo (`curl`,
+139 testes, sem rede e sem subir o PJe-Calc — tudo que toca o mundo (`curl`,
 `systemctl`, `notify-send`, o lançador, a extração) está substituído por dublê.
 
 | Arquivo | Cobre |
 |---|---|
 | `tests/test_datas.py` | TR no mês seguinte, IPCA-E no corrente, virada de ano, nomes e pastas de saída |
+| `tests/test_tabela.py` | deduplicação da paginação, cabeçalho repetido, coluna a mais, ordem das linhas |
+| `tests/test_console.py` | a linha `Pasta :` que o shell lê, e a recusa de pedir ENTER sem terminal |
 | `tests/test_verificar_versao.py` | leitura do portal, ordem das fontes, comparação numérica, os três códigos de saída |
 | `tests/test_timer.py` | todo mês tem rodada no dia 6 ou no primeiro dia útil seguinte, por 24 meses |
 | `tests/test_lancador.sh` | `url`, `esperar`, `status`, recusa sem `pjecalc.env` |
@@ -220,24 +263,20 @@ verifica rodando de verdade:
 ### Os testes são testados
 
 A suíte foi validada por mutação: quebra-se o código de propósito e confere-se
-que ela acusa. As nove mutações conferidas estão listadas no commit que
-introduziu os testes — duas delas passaram na primeira tentativa e revelaram
-buracos reais (um mês sem disparo nenhum não era conferido, e uma asserção com
-`in` aceitava o fallback no lugar do caminho preferido).
+que ela acusa. As nove mutações da primeira rodada estão listadas no commit que
+introduziu os testes — duas passaram de primeira e revelaram buracos reais (um
+mês sem disparo nenhum não era conferido, e uma asserção com `in` aceitava o
+fallback no lugar do caminho preferido). As oito da separação em camadas estão
+no commit que a fez, e cobrem o que saiu do laço do Selenium: deduplicação,
+reconhecimento de competência, virada de ano, a linha que o shell lê.
 
 Ao mexer na lógica de decisão, repita: quebre, rode, veja falhar.
 
 ## Configuração
 
-No topo de `busca_indices_rpa.py`:
-
-| Constante | Para quê |
-|---|---|
-| `PORTA` | porta do PJe-Calc (padrão `9257`, definida em `tomcat/conf/server.xml`) |
-| `NAVEGADOR` | `"firefox"` ou `"chrome"` |
-| `CONFIG_INDICES` | intervalo de datas e ids JSF de cada índice |
-
-Variáveis de ambiente:
+Tudo que muda entre uma rodada e outra vem do ambiente e é lido num lugar só,
+`pjecalc/config.py`. O que é da tela — intervalo de datas e ids JSF de cada
+índice — está em `pjecalc/model/indice.py`.
 
 | Variável | Para quê |
 |---|---|

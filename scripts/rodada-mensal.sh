@@ -68,7 +68,7 @@ echo ">> Extraindo indices (sem janela)..."
 cd "$PROJETO"
 SAIDA="$(mktemp)"
 trap 'rm -f "$SAIDA"' EXIT
-PJECALC_FF_HEADLESS=1 .venv/bin/python -u busca_indices_rpa.py 2>&1 | tee "$SAIDA" \
+PJECALC_FF_HEADLESS=1 .venv/bin/python -u -m pjecalc 2>&1 | tee "$SAIDA" \
   || falhar "A extracao nao terminou."
 
 # Quem decide o nome da pasta e o Python; aqui so lemos o que ele disse.

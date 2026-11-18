@@ -66,9 +66,10 @@ fixado, a rodada cai às 11h de Belém independentemente da configuração do ho
 
 ## 4. Sem display, sem janela
 
-O `busca_indices_rpa.py` decide sozinho: sem `DISPLAY` nem `WAYLAND_DISPLAY`, o
-Firefox sobe headless. Numa estação com sessão gráfica o padrão continua sendo a
-janela visível, que ajuda a depurar. `PJECALC_FF_HEADLESS=0/1` decide à força.
+A automação decide sozinha (`pjecalc/config.py`): sem `DISPLAY` nem
+`WAYLAND_DISPLAY`, o Firefox sobe headless. Numa estação com sessão gráfica o
+padrão continua sendo a janela visível, que ajuda a depurar.
+`PJECALC_FF_HEADLESS=0/1` decide à força.
 
 O **servidor** PJe-Calc nunca precisou de display: ele roda como serviço desde
 que deixou de usar a UI do lançador (veja o README).
