@@ -13,8 +13,14 @@ FALHOU=0
 
 titulo() { echo; echo "═══ $1 ═══"; }
 
-titulo "datas e nomes de arquivo"
-"$PY" "$RAIZ/tests/test_datas.py" 2>&1 | tail -3 || FALHOU=1
+titulo "datas, indices e nomes de arquivo"
+"$PY" "$RAIZ/tests/test_datas.py" 2>&1 | grep -E "^(OK|FAILED|Ran)" || FALHOU=1
+
+titulo "tabela extraida"
+"$PY" "$RAIZ/tests/test_tabela.py" 2>&1 | grep -E "^(OK|FAILED|Ran)" || FALHOU=1
+
+titulo "saida no terminal"
+"$PY" "$RAIZ/tests/test_console.py" 2>&1 | grep -E "^(OK|FAILED|Ran)" || FALHOU=1
 
 titulo "verificacao de versao"
 "$PY" "$RAIZ/tests/test_verificar_versao.py" 2>&1 | grep -E "^(OK|FAILED|Ran)" || FALHOU=1

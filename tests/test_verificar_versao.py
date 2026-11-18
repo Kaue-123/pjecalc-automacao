@@ -7,7 +7,6 @@ le a ignorar o aviso.
 """
 import importlib.util
 import os
-import sys
 import unittest
 from unittest import mock
 
